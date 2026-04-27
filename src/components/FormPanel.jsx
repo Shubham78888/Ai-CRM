@@ -143,25 +143,7 @@ const FormPanel = () => {
           </div>
         </div>
       </div>
-
-      {/* Save Button */}
-      <button className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold px-6 py-3 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105">
-        💾 Save Interaction
-      </button>
-
-      {/* Info Cards */}
-      <div className="grid grid-cols-2 gap-3 pt-4">
-        <div className="bg-slate-700 border border-slate-600 p-3 rounded-lg">
-          <p className="text-xs text-gray-400">Total Fields</p>
-          <p className="text-lg font-bold text-cyan-400">8</p>
-        </div>
-        <div className="bg-slate-700 border border-slate-600 p-3 rounded-lg">
-          <p className="text-xs text-gray-400">Completed</p>
-          <p className="text-lg font-bold text-emerald-400">
-            {Object.values(form).filter((v) => v).length}/8
-          </p>
-        </div>
-      </div>
+      
     </div>
   );
 };
