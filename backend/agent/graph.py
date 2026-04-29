@@ -160,24 +160,30 @@ def summarize_node(state: AgentState) -> AgentState:
 def history_node(state: AgentState) -> AgentState:
     """Execute history fetch tool"""
     try:
-        hcp_name = state.get("current_data", {}).get("hcp_name", "")
+        # For history requests, ALWAYS prioritize extracting from user input
+        # Don't use current_data.hcp_name because it might be from a different doctor
+        import re
         
+        hcp_name = ""
+        
+        # Try to extract from user input with improved regex
+        # Match patterns like: "Dr. Patel", "Dr Patel", "doctor patel", "with patel"
+        patterns = [
+            r"(?:with|doctor|dr\.?)\s+([A-Za-z\s]+?)(?:\s+(?:the|a|and|or|but)|$)",
+            r"(?:doctor|dr\.?|hcp|professional)\s+([A-Za-z\s]+?)(?:\s+(?:at|in|on)|$)",
+            r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"  # Fallback: capitalize patterns
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, state["input"], re.IGNORECASE)
+            if match:
+                hcp_name = match.group(1).strip()
+                if hcp_name and hcp_name.lower() not in ["history", "me", "show", "the"]:
+                    break
+        
+        # Fallback to current_data only if nothing extracted from input
         if not hcp_name:
-            # Try to extract from user input with improved regex
-            import re
-            # Match patterns like: "Dr. Patel", "Dr Patel", "doctor patel", "with patel"
-            patterns = [
-                r"(?:with|doctor|dr\.?)\s+([A-Za-z\s]+?)(?:\s+(?:the|a|and|or|but)|$)",
-                r"(?:doctor|dr\.?|hcp|professional)\s+([A-Za-z\s]+?)(?:\s+(?:at|in|on)|$)",
-                r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"  # Fallback: capitalize patterns
-            ]
-            
-            for pattern in patterns:
-                match = re.search(pattern, state["input"], re.IGNORECASE)
-                if match:
-                    hcp_name = match.group(1).strip()
-                    if hcp_name and hcp_name.lower() not in ["history", "me", "show", "the"]:
-                        break
+            hcp_name = state.get("current_data", {}).get("hcp_name", "")
         
         # Clean up the extracted name
         if hcp_name:
