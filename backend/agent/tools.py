@@ -5,20 +5,20 @@ from utils.llm import llm
 from utils.validator import extract_json, clean_interaction_data
 from datetime import datetime, timedelta
 from utils.date_parser import extract_date
-from database import SessionLocal, HCPInteraction
+from database import SessionLocal, HCPInteraction, HCPProfile, InteractionHistory
 
 
 # ==================== DATABASE OPERATIONS ====================
 
 def save_interaction(data):
-    """Save interaction to database"""
+    """Save interaction to database and update related tables"""
     try:
         session = SessionLocal()
         
         # Clean data
         clean_data = clean_interaction_data(data)
         
-        # Create model instance
+        # 1. Save to hcp_interactions
         interaction = HCPInteraction(
             hcp_name=clean_data["hcp_name"],
             interaction_type=clean_data["interaction_type"],
@@ -33,6 +33,38 @@ def save_interaction(data):
         )
         
         session.add(interaction)
+        session.flush()  # Get the ID before committing
+        
+        # 2. Update or create HCP Profile
+        hcp_profile = session.query(HCPProfile).filter(
+            HCPProfile.hcp_name == clean_data["hcp_name"]
+        ).first()
+        
+        if hcp_profile:
+            # Update existing profile
+            hcp_profile.last_interaction_date = clean_data["interaction_date"]
+            hcp_profile.interaction_count = (hcp_profile.interaction_count or 0) + 1
+            hcp_profile.updated_at = datetime.now()
+        else:
+            # Create new profile
+            hcp_profile = HCPProfile(
+                hcp_name=clean_data["hcp_name"],
+                last_interaction_date=clean_data["interaction_date"],
+                interaction_count=1
+            )
+            session.add(hcp_profile)
+        
+        session.flush()
+        
+        # 3. Save to interaction_history for audit trail
+        history_record = InteractionHistory(
+            interaction_id=interaction.id,
+            hcp_name=clean_data["hcp_name"],
+            action="created",
+            new_data=clean_data
+        )
+        session.add(history_record)
+        
         session.commit()
         
         result = {
@@ -78,7 +110,7 @@ def fetch_interaction(interaction_id):
 
 
 def update_interaction(interaction_id, updated_data):
-    """Update existing interaction"""
+    """Update existing interaction and save to history"""
     try:
         session = SessionLocal()
         interaction = session.query(HCPInteraction).filter(
@@ -89,6 +121,20 @@ def update_interaction(interaction_id, updated_data):
             session.close()
             return {"status": "error", "message": "Interaction not found"}
         
+        # Store old data for audit trail
+        old_data = {
+            "hcp_name": interaction.hcp_name,
+            "interaction_type": interaction.interaction_type,
+            "interaction_date": interaction.interaction_date,
+            "products_discussed": interaction.products_discussed,
+            "discussion_summary": interaction.discussion_summary,
+            "doctor_feedback": interaction.doctor_feedback,
+            "follow_up_action": interaction.follow_up_action,
+            "sentiment": interaction.sentiment,
+            "key_points": interaction.key_points,
+            "action_items": interaction.action_items
+        }
+        
         # Clean and apply updates
         clean_data = clean_interaction_data(updated_data)
         
@@ -96,6 +142,17 @@ def update_interaction(interaction_id, updated_data):
             if hasattr(interaction, key) and value:
                 setattr(interaction, key, value)
         
+        session.commit()
+        
+        # Save to interaction_history for audit trail
+        history_record = InteractionHistory(
+            interaction_id=interaction_id,
+            hcp_name=interaction.hcp_name,
+            action="updated",
+            old_data=old_data,
+            new_data=clean_data
+        )
+        session.add(history_record)
         session.commit()
         session.close()
         
@@ -106,23 +163,49 @@ def update_interaction(interaction_id, updated_data):
 
 
 def fetch_hcp_history(hcp_name):
-    """Fetch all interactions for an HCP"""
+    """Fetch all interactions for an HCP with complete details"""
     try:
         session = SessionLocal()
+        
+        # Build flexible search query
+        # Handle partial matches and case-insensitive search
+        search_term = f"%{hcp_name}%"
+        
         interactions = session.query(HCPInteraction).filter(
-            HCPInteraction.hcp_name.ilike(f"%{hcp_name}%")
+            HCPInteraction.hcp_name.ilike(search_term)
         ).order_by(HCPInteraction.created_at.desc()).all()
         
         session.close()
         
+        if not interactions:
+            # If no exact match, try alternative spellings
+            print(f"No interactions found for '{hcp_name}', checking database...")
+            session = SessionLocal()
+            # Get all HCP names to see what's stored
+            all_hcps = session.query(HCPInteraction.hcp_name.distinct()).all()
+            print(f"Available HCPs in database: {[hcp[0] for hcp in all_hcps]}")
+            session.close()
+            return []
+        
         history = []
         for interaction in interactions:
+            # Format timestamp with date and time
+            created_dt = interaction.created_at
+            formatted_time = created_dt.strftime("%Y-%m-%d %H:%M:%S") if created_dt else "N/A"
+            
             history.append({
                 "id": interaction.id,
                 "date": interaction.interaction_date,
+                "time_recorded": formatted_time,
                 "type": interaction.interaction_type,
-                "summary": interaction.discussion_summary,
-                "created_at": interaction.created_at.isoformat() if interaction.created_at else None
+                "summary": interaction.discussion_summary or "No summary",
+                "products": interaction.products_discussed or [],
+                "feedback": interaction.doctor_feedback or "No feedback",
+                "sentiment": interaction.sentiment or "neutral",
+                "follow_up": interaction.follow_up_action or "None",
+                "key_points": interaction.key_points or [],
+                "action_items": interaction.action_items or [],
+                "created_at": created_dt.isoformat() if created_dt else None
             })
         
         return history
@@ -293,7 +376,7 @@ Summary:
 def fetch_history_tool(hcp_name):
     """
     Fetch all previous interactions with an HCP from database
-    Shows interaction timeline and patterns
+    Shows interaction timeline with complete details
     """
     try:
         if not hcp_name:
@@ -302,17 +385,66 @@ def fetch_history_tool(hcp_name):
                 "message": "HCP name required"
             }
         
-        # Query database
+        print(f"📊 Fetching history for HCP: '{hcp_name}'")
+        
+        # Query database for rich history
         history = fetch_hcp_history(hcp_name)
+        
+        if not history:
+            # Provide helpful message with available HCPs
+            try:
+                session = SessionLocal()
+                all_hcps = session.query(HCPInteraction.hcp_name.distinct()).all()
+                available_hcps = [hcp[0] for hcp in all_hcps] if all_hcps else []
+                session.close()
+                
+                available_list = ", ".join(available_hcps) if available_hcps else "No interactions recorded yet"
+                
+                return {
+                    "hcp_name": hcp_name,
+                    "total_interactions": 0,
+                    "message": f"No interaction history found for '{hcp_name}'. Available doctors: {available_list}",
+                    "history": [],
+                    "status": "success",
+                    "timestamp": datetime.now().isoformat()
+                }
+            except Exception as e:
+                return {
+                    "hcp_name": hcp_name,
+                    "total_interactions": 0,
+                    "message": f"No interaction history found for '{hcp_name}'",
+                    "history": [],
+                    "status": "success",
+                    "timestamp": datetime.now().isoformat()
+                }
+        
+        # Format history for display
+        formatted_history = []
+        for idx, interaction in enumerate(history, 1):
+            formatted_entry = f"""
+📅 Interaction #{idx}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📍 Date: {interaction['date']} | Time Recorded: {interaction['time_recorded']}
+🔄 Type: {interaction['type'].upper()}
+💬 Summary: {interaction['summary']}
+💊 Products: {', '.join(interaction['products']) if interaction['products'] else 'None'}
+😊 Sentiment: {interaction['sentiment'].upper()}
+📝 Feedback: {interaction['feedback']}
+✅ Follow-up: {interaction['follow_up']}
+🎯 Key Points: {len(interaction['key_points'])} points
+📋 Action Items: {len(interaction['action_items'])} items"""
+            formatted_history.append(formatted_entry)
         
         return {
             "hcp_name": hcp_name,
             "total_interactions": len(history),
             "history": history,
+            "formatted_display": "\n".join(formatted_history),
             "status": "success",
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
+        print(f"❌ Error in fetch_history_tool: {str(e)}")
         return {
             "status": "error",
             "message": f"Failed to fetch history: {str(e)}"

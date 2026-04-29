@@ -163,13 +163,26 @@ def history_node(state: AgentState) -> AgentState:
         hcp_name = state.get("current_data", {}).get("hcp_name", "")
         
         if not hcp_name:
-            # Try to extract from user input
+            # Try to extract from user input with improved regex
             import re
-            match = re.search(r"(?:doctor|dr|hcp|professional)\s+([A-Za-z\s]+)", state["input"], re.IGNORECASE)
-            if match:
-                hcp_name = match.group(1).strip()
+            # Match patterns like: "Dr. Patel", "Dr Patel", "doctor patel", "with patel"
+            patterns = [
+                r"(?:with|doctor|dr\.?)\s+([A-Za-z\s]+?)(?:\s+(?:the|a|and|or|but)|$)",
+                r"(?:doctor|dr\.?|hcp|professional)\s+([A-Za-z\s]+?)(?:\s+(?:at|in|on)|$)",
+                r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"  # Fallback: capitalize patterns
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, state["input"], re.IGNORECASE)
+                if match:
+                    hcp_name = match.group(1).strip()
+                    if hcp_name and hcp_name.lower() not in ["history", "me", "show", "the"]:
+                        break
         
-        if not hcp_name:
+        # Clean up the extracted name
+        if hcp_name:
+            hcp_name = hcp_name.strip().title()
+        else:
             hcp_name = "Default"
         
         result = fetch_history_tool(hcp_name)

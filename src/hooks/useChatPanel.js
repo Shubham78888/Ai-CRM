@@ -23,6 +23,38 @@ export const useChatPanel = (formData, onFormUpdate) => {
 
     const parts = [];
 
+    // 🎯 Check if this is a HISTORY response
+    if (data.total_interactions !== undefined && data.history) {
+      if (data.total_interactions === 0) {
+        parts.push(`📋 **History:** ${data.message || "No interaction history found"}`);
+      } else {
+        parts.push(`📋 **Interaction History for ${data.hcp_name}**`);
+        parts.push(`Total Interactions: ${data.total_interactions}`);
+        parts.push("━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        // Display formatted history if available
+        if (data.formatted_display) {
+          parts.push(data.formatted_display);
+        } else {
+          // Fallback: build from history array
+          data.history.forEach((interaction, idx) => {
+            parts.push(`\n📅 Interaction #${idx + 1}`);
+            parts.push(`📍 Date: ${interaction.date} | Time: ${interaction.time_recorded}`);
+            parts.push(`🔄 Type: ${interaction.type.toUpperCase()}`);
+            parts.push(`💬 Summary: ${interaction.summary}`);
+            if (interaction.products && interaction.products.length > 0) {
+              parts.push(`💊 Products: ${interaction.products.join(", ")}`);
+            }
+            parts.push(`😊 Sentiment: ${interaction.sentiment.toUpperCase()}`);
+            if (interaction.feedback) {
+              parts.push(`📝 Feedback: ${interaction.feedback}`);
+            }
+          });
+        }
+      }
+      return parts.join("\n");
+    }
+
     if (data.follow_up_action) {
       parts.push(`📋 **Follow-up:** ${data.follow_up_action}`);
     }
