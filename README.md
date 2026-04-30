@@ -315,14 +315,18 @@ source venv/bin/activate
 # Install dependencies
 pip install fastapi uvicorn pydantic langchain langchain-groq langgraph sqlalchemy python-dotenv
 
+# DB module 
+pip install PyMySQL
+# Datautils
+pip install python-dateutil
+
 # Create .env file
 cat > .env << EOF
 GROQ_API_KEY=your_groq_api_key_here
 DATABASE_URL=sqlite:///./crm.db
 # Or for PostgreSQL:
 # DATABASE_URL=postgresql://user:password@localhost/crm_db
-# DB module pip install PyMySQL
-# Datautils pip install python-dateutil
+
 
 EOF
 
